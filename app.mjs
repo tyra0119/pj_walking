@@ -1,7 +1,7 @@
 // あんしん散歩道: スタート地点と歩く時間を決めると、なるべく安全な道を通ってスタートに戻る道順を作る
-import { Graph, makeLoops, routeGeometry, Progress } from './route.mjs?v=1412f2f-10152140';
-import { demSource, exaggerationFor } from './terrain.mjs?v=1412f2f-10152140';
-import { loadArea, bboxAround } from './area-loader.mjs?v=1412f2f-10152140';
+import { Graph, makeLoops, routeGeometry, Progress } from './route.mjs?v=c9a0d9a-10152156';
+import { demSource, exaggerationFor } from './terrain.mjs?v=c9a0d9a-10152156';
+import { loadArea, bboxAround } from './area-loader.mjs?v=c9a0d9a-10152156';
 
 const $ = (id) => document.getElementById(id);
 const COLORS = ['#16a34a', '#2563eb', '#ca8a04', '#ea580c', '#dc2626'];
@@ -453,7 +453,7 @@ $('btnFold').onclick = () => { $('panel').classList.toggle('folded'); syncFold()
 // ---------- 上津台の道の網を読む（前もって作ったもの。ほかの場所はスタートを置いて道順を作るときに読み込む） ----------
 (async () => {
   try {
-    const r = await fetch('./data/graph.json?v=1412f2f-10152140');
+    const r = await fetch('./data/graph.json?v=c9a0d9a-10152156');
     const g = new Graph(await r.json());
     graphs.unshift(g);
     useGraph(g);

@@ -138,7 +138,7 @@ function tryLoop(G, start, heading, r, nWay) {
     if (!leg) return null;
     for (const s of leg) { used.set(s.e, (used.get(s.e) ?? 0) + 1); path.push(s); }
   }
-  return summarize(G, trimSpurs(G, path));
+  return summarize(G, simplify(G, path));
 }
 
 // 中継点で行き止まりに入って同じ道を引き返す「ひげ」を取る（…→ X → Y → X →… の Y を除く）
@@ -150,6 +150,38 @@ function trimSpurs(G, path) {
     out.push(s);
   }
   return out;
+}
+
+// 途中で同じ交差点に戻ってくる小さな輪（全体の 25% 未満）を取る。中継点の手前で、通った道を引き返す代わりに
+// 一区画をぐるっと回って戻る形になりやすかった（同じ道を二度通ると重くしているため。2026-10-15 利用者
+// 「ルートの途中でくるっと小さく 1 周する箇所がある」。試すと道順の 3 本に 1 本、100〜600 m の輪があった）。
+// 輪を取ると引き返しの「ひげ」が残ることがあるので、ひげ取りと交互に、変わらなくなるまで繰り返す
+function removeSmallCycles(G, path) {
+  if (!path.length) return path; // 行って戻るだけの道順は、ひげを取ると何も残らない
+  const total = path.reduce((s, { e }) => s + G.len[e], 0);
+  const nodeAt = (i) => (i === 0 ? (path[0].fwd ? G.ea[path[0].e] : G.eb[path[0].e]) : (path[i - 1].fwd ? G.eb[path[i - 1].e] : G.ea[path[i - 1].e]));
+  const seen = new Map(); // 交差点 → 最後に通った位置
+  let cum = 0;
+  const cumAt = [0];
+  for (let i = 0; i < path.length; i++) { cum += G.len[path[i].e]; cumAt.push(cum); }
+  for (let i = 0; i <= path.length; i++) {
+    const v = nodeAt(i);
+    if (seen.has(v)) {
+      const j = seen.get(v);
+      const whole = j === 0 && i === path.length; // 出発地から出発地までは道順そのもの
+      if (!whole && cumAt[i] - cumAt[j] < total * 0.25) return [...path.slice(0, j), ...path.slice(i)];
+    }
+    seen.set(v, i);
+  }
+  return path;
+}
+function simplify(G, path) {
+  for (let k = 0; k < 20 && path.length; k++) {
+    const next = removeSmallCycles(G, trimSpurs(G, path));
+    if (next.length === path.length) return next;
+    path = next;
+  }
+  return path;
 }
 
 function summarize(G, path) {
