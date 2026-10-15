@@ -82,6 +82,7 @@ select { flex: 1; border: 1px solid var(--line); border-radius: 8px; padding: 6p
 #walkInfo { margin-top: 8px; padding: 8px 10px; border-radius: 8px; background: #f0fdf4; font-size: 14px; }
 #walkInfo b { font-size: 18px; }
 .check { display: flex; gap: 6px; align-items: center; margin-top: 12px; font-size: 13px; }
+.check + .check { margin-top: 6px; }
 .note { margin: 8px 0 0; font-size: 11px; line-height: 1.5; color: var(--muted); }
 
 #toast { position: fixed; left: 50%; top: 14px; transform: translateX(-50%); z-index: 20; background: rgba(17, 24, 39, 0.9); color: #fff; padding: 8px 14px; border-radius: 10px; font-size: 14px; max-width: calc(100% - 32px); }

@@ -1,7 +1,7 @@
 // あんしん散歩道: スタート地点と歩く時間を決めると、なるべく安全な道を通ってスタートに戻る道順を作る
-import { Graph, makeLoops, routeGeometry, Progress, routeTurns } from './route.mjs?v=25f4730-10152218';
-import { demSource, exaggerationFor } from './terrain.mjs?v=25f4730-10152218';
-import { loadArea, bboxAround } from './area-loader.mjs?v=25f4730-10152218';
+import { Graph, makeLoops, routeGeometry, Progress, routeTurns } from './route.mjs?v=5ee49af-10152253';
+import { demSource, exaggerationFor } from './terrain.mjs?v=5ee49af-10152253';
+import { loadArea, bboxAround } from './area-loader.mjs?v=5ee49af-10152253';
 
 const $ = (id) => document.getElementById(id);
 const COLORS = ['#16a34a', '#2563eb', '#ca8a04', '#ea580c', '#dc2626'];
@@ -9,6 +9,10 @@ const CLASS_NOTE = ['歩道・遊歩道・公園の道', '幅 5.5 m 以上の道
 const MINUTES = [15, 20, 30, 45, 60, 90];
 const CENTER = [135.195, 34.865];
 const narrow = () => innerWidth <= 720;
+// スマホ（指で触る・狭い画面）: 地図を軽くする（2026-10-15 利用者「スマホで見ると地図スクロールが重い」）。
+// 画面の細かさを 1.5 倍まで（iPhone は 3 倍で、描く画素が 4 倍だった）、地形の陰影なし、標高は一段粗く、
+// 建物の立体はもう一段近づいてから、傾きは浅め。標高の変換は別のスレッド（web/dem-worker.js）
+const MOBILE = matchMedia('(pointer: coarse)').matches || innerWidth < 760;
 const load = (k, d) => { try { return localStorage.getItem(k) ?? d; } catch { return d; } };
 const save = (k, v) => { try { localStorage.setItem(k, v); } catch { /* 使えなくてもよい */ } };
 
@@ -28,8 +32,10 @@ let watchId = null;
 const map = new maplibregl.Map({
   container: 'map',
   style: 'https://basemaps.cartocdn.com/gl/positron-gl-style/style.json',
-  center: CENTER, zoom: 15.2, pitch: 50, bearing: -15,
-  minZoom: 11, maxZoom: 19, maxPitch: 70,
+  center: CENTER, zoom: 15.2, pitch: MOBILE ? 45 : 50, bearing: -15,
+  minZoom: 11, maxZoom: 19, maxPitch: MOBILE ? 60 : 70,
+  pixelRatio: Math.min(devicePixelRatio || 1, MOBILE ? 1.5 : 2),
+  fadeDuration: MOBILE ? 0 : 300,
   pitchWithRotate: true, // 右ドラッグで回転と傾き
   attributionControl: { compact: true, customAttribution: '道: © OpenStreetMap contributors、国土地理院' },
 });
@@ -69,17 +75,18 @@ map.on('load', () => {
   const lastLine = layers.findLastIndex((l) => l.type === 'line');
   const firstSymbol = layers.find((l, i) => i > lastLine && l.type === 'symbol')?.id;
   const firstLine = layers.find((l) => l.type === 'line' || l.type === 'symbol')?.id;
-  // 地形の立体と陰影（国土地理院の標高）
-  map.addSource('dem', demSource());
-  map.addSource('dem-shade', demSource());
-  map.addLayer({ id: 'hillshade', type: 'hillshade', source: 'dem-shade', paint: {
-    'hillshade-exaggeration': 0.35, 'hillshade-shadow-color': '#5b6670', 'hillshade-highlight-color': '#ffffff', 'hillshade-accent-color': '#5b6670', 'hillshade-illumination-anchor': 'map',
-  } }, firstLine);
-  map.setTerrain({ source: 'dem', exaggeration: exaggerationFor(map.getZoom()) });
+  // 地形の立体と陰影（国土地理院の標高）。陰影はスマホでは描かない（標高をもう 1 組読んで描くので重い）
+  map.addSource('dem', demSource(MOBILE ? 13 : undefined));
+  if (!MOBILE) {
+    map.addSource('dem-shade', demSource());
+    map.addLayer({ id: 'hillshade', type: 'hillshade', source: 'dem-shade', paint: {
+      'hillshade-exaggeration': 0.35, 'hillshade-shadow-color': '#5b6670', 'hillshade-highlight-color': '#ffffff', 'hillshade-accent-color': '#5b6670', 'hillshade-illumination-anchor': 'map',
+    } }, firstLine);
+  }
   // 3D の建物（CARTO の建物の高さ）
   if (map.getSource('carto')) {
     map.addLayer({
-      id: 'bldg-3d', type: 'fill-extrusion', source: 'carto', 'source-layer': 'building', minzoom: 14,
+      id: 'bldg-3d', type: 'fill-extrusion', source: 'carto', 'source-layer': 'building', minzoom: MOBILE ? 15 : 14,
       filter: ['!=', ['get', 'hide_3d'], true],
       paint: {
         'fill-extrusion-color': '#d6dbe2',
@@ -129,6 +136,22 @@ map.on('load', () => {
   updateNet();
 });
 map.on('zoom', () => { if (map.getTerrain()) map.terrain.exaggeration = exaggerationFor(map.getZoom()); });
+// 立体表示（地形と建物）の切り替え。重い機種では外すと平らな地図になる（陰影はそのまま）
+let show3d = load('wk.3d', '1') === '1';
+$('show3d').checked = show3d;
+function apply3d() {
+  if (!map.getSource('dem')) return;
+  map.setTerrain(show3d ? { source: 'dem', exaggeration: exaggerationFor(map.getZoom()) } : null);
+  if (map.getLayer('bldg-3d')) map.setLayoutProperty('bldg-3d', 'visibility', show3d ? 'visible' : 'none');
+}
+map.on('load', apply3d);
+$('show3d').onchange = (e) => {
+  show3d = e.target.checked;
+  save('wk.3d', show3d ? '1' : '0');
+  apply3d();
+  map.easeTo({ pitch: show3d ? (MOBILE ? 45 : 50) : 0, duration: 600 });
+};
+if (!show3d) map.setPitch(0);
 
 // ---------- 地図のボタン（右下に縦に。上から 方角・現在地・拡大・縮小） ----------
 const ICON = {
@@ -558,7 +581,7 @@ $('btnFold').onclick = () => { $('panel').classList.toggle('folded'); syncFold()
 // ---------- 上津台の道の網を読む（前もって作ったもの。ほかの場所はスタートを置いて道順を作るときに読み込む） ----------
 (async () => {
   try {
-    const r = await fetch('./data/graph.json?v=25f4730-10152218');
+    const r = await fetch('./data/graph.json?v=5ee49af-10152253');
     const g = new Graph(await r.json());
     graphs.unshift(g);
     useGraph(g);

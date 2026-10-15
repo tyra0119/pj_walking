@@ -41,7 +41,39 @@ const MAX_TILES = 200;
 const done = new Map();    // url → 変換した PNG
 const pending = new Map(); // url → { promise, ctrl, refs }
 
+// 変換は別のスレッド（web/dem-worker.js）で行う（スマホで地図のスクロールが重かった。2026-10-15）。
+// OffscreenCanvas が使えないブラウザや、別のスレッドでうまくいかなかったときは、ここで変換する
+let worker = null, workerOk = typeof OffscreenCanvas !== 'undefined' && 'convertToBlob' in OffscreenCanvas.prototype && typeof Worker !== 'undefined';
+let seq = 0;
+const waiting = new Map(); // id → { resolve, reject }
+function getWorker() {
+  if (!workerOk) return null;
+  if (!worker) {
+    try {
+      worker = new Worker(new URL('./dem-worker.js?v=5ee49af-10152253', import.meta.url));
+      worker.onmessage = (ev) => { const w = waiting.get(ev.data.id); if (!w) return; waiting.delete(ev.data.id); w.resolve(ev.data); };
+      worker.onerror = () => { workerOk = false; for (const w of waiting.values()) w.resolve({ error: 'worker' }); waiting.clear(); };
+    } catch { workerOk = false; return null; }
+  }
+  return worker;
+}
 async function loadTile(url, signal) {
+  const w = getWorker();
+  if (w) {
+    const id = ++seq;
+    const r = await new Promise((resolve, reject) => {
+      waiting.set(id, { resolve });
+      signal.addEventListener('abort', () => { waiting.delete(id); w.postMessage({ cancel: id }); reject(new DOMException('aborted', 'AbortError')); }, { once: true });
+      w.postMessage({ id, url });
+    });
+    if (r.buf) return r.buf;
+    if (r.status === 404) return getFlatTile();
+    if (r.status) throw new Error(`標高タイル ${r.status} ${url}`);
+    workerOk = false; // 別のスレッドで変換できなかった: 以後はここで
+  }
+  return loadTileHere(url, signal);
+}
+async function loadTileHere(url, signal) {
   const res = await fetch(url, { signal });
   // 平らなタイルにするのは「タイルが無い」（404）ときだけ。一時的な失敗は失敗のまま返す（MapLibre が取り直す）
   if (res.status === 404) return getFlatTile();
@@ -88,8 +120,9 @@ maplibregl.addProtocol('wkdem', async (params, abort) => {
 });
 
 /** 地形の元（MapLibre の source）。地形用と陰影用は別にする（同じだと MapLibre が警告し、陰影が粗くなる） */
-export const demSource = () => ({
-  type: 'raster-dem', tiles: [`wkdem://${GSI_DEM}`], tileSize: TILE, minzoom: 1, maxzoom: DEM_MAX_ZOOM, encoding: 'terrarium', attribution: DEM_CREDIT,
+// maxzoom を下げると標高は粗くなるが、読むタイルは 1/4 ずつ減る（スマホは 13）
+export const demSource = (maxzoom = DEM_MAX_ZOOM) => ({
+  type: 'raster-dem', tiles: [`wkdem://${GSI_DEM}`], tileSize: TILE, minzoom: 1, maxzoom, encoding: 'terrarium', attribution: DEM_CREDIT,
 });
 
 // 引いて見るほど山は平たく見えるので、縮尺が小さいときは高さを強める（縮尺 13 以上は 1.3 倍）
