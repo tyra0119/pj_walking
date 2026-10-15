@@ -26,21 +26,40 @@ function walkable(t) {
 const WIDTH_RANK = { '3m未満': 1, '3m-5.5m未満': 2, '5.5m-13m未満': 3, '13m-19.5m未満': 4, '19.5m以上': 5 };
 // OSM の yh:WIDTH（Yahoo のデータを取り込んだときの道幅）。地理院で分からないときに使う
 const YH_RANK = { '1.5m未満': 1, '1.5m〜3.0m': 1, '3.0m〜5.5m': 2, '5.5m〜13.0m': 3, '13.0m以上': 4 };
-// 町（住宅地・公園など）。舗装の書かれていない歩行者の小道が、町の中の小道か山の中の小道かを見分ける
-const TOWN = new Set(['residential', 'commercial', 'retail', 'education', 'cemetery', 'recreation_ground', 'park', 'playground', 'pitch', 'garden']);
+// 町の範囲の種類。舗装の書かれていない歩行者の小道が、公園の道か・住宅の中の小道か・山の中の小道かを見分ける
+// （住宅の中を抜ける小道は防犯上よくないので住宅地の道にする。2026-10-15 利用者「住宅の中を歩くのは防犯上よろしくない」）
+const AREA_KIND = {
+  park: 'park', playground: 'park', pitch: 'park', garden: 'park', recreation_ground: 'park', cemetery: 'park',
+  residential: 'home', commercial: 'town', retail: 'town', education: 'town',
+};
 
-// cost はその段階の道を 1 m 歩く重み（小さいほど選ばれやすい）
-function classify(t, w, town) {
+// 段階ごとに classify() の重みへ掛ける倍率。住宅地の道より広い道を強く優先する（2026-10-15 利用者「住宅地の道より
+// 広い道をもっと強く優先してほしい」「住宅の中を歩くのは防犯上よろしくない。安全で広い道優先にしてほしい」）。
+// 上津台の 5 地点で比べた道順の広い道: 1 倍 30 分 53%・60 分 77% → 2 倍 80%・87% → 3 倍 82%・90% → 4 倍 82%・93%
+// （中継点を広い道に寄せるのとあわせて。web/route.mjs の WAYPOINT）。3 倍で残る住宅地の道（30 分 9%・60 分 5%）は大半が
+// 住宅地の中の出発地から広い道へ出るまでと戻るまで。4 倍は長さの目標からのずれ（60 分 7% → 9%）が増えるだけなので 3 倍
+const CLASS_WEIGHT = [1, 1, 3, 3, 3];
+
+// cost はその段階の道を 1 m 歩く重み（小さいほど選ばれやすい。ここに CLASS_WEIGHT を掛ける）
+// area: 道のある所の種類（'park' 公園など・'home' 住宅地・'town' 店や学校・null 町の外か森）
+function classify(t, w, area) {
   const hw = t.highway, paved = PAVED.has(t.surface);
   const rank = w.rank || YH_RANK[t['yh:WIDTH']] || 0;
   if (hw === 'steps') return [4, 3.0];
   if (hw === 'footway' || hw === 'pedestrian' || hw === 'cycleway') {
-    // 舗装・歩道・横断歩道・地理院の地図にも載っている（公園の道など）ものは歩行者の道。どれでもないものは山の中の小道が多い
-    if (paved || ['sidewalk', 'crossing'].includes(t.footway) || hw === 'pedestrian' || w.matched || t.lit === 'yes') return [0, 1.0];
-    if (town) return [0, 1.1]; // 住宅地・公園の中の小道
+    // 歩道・横断歩道・歩行者の広場・公園の道は歩行者の道。住宅地の中の小道（家と家の間を抜ける道）は住宅地の道。
+    // ほかは舗装・地理院の地図にも載っている・照明があれば歩行者の道、どれでもないものは山の中の小道が多い
+    if (['sidewalk', 'crossing'].includes(t.footway) || hw === 'pedestrian' || w.park || area === 'park') return [0, 1.0];
+    if (area === 'home') return [2, 1.6];
+    if (paved || w.matched || t.lit === 'yes') return [0, 1.0];
+    if (area) return [0, 1.1];
     return [4, 3.5];
   }
-  if (hw === 'path') return paved || w.park || town ? [0, 1.1] : [4, 4.0];
+  if (hw === 'path') {
+    if (w.park || area === 'park') return [0, 1.1];
+    if (area === 'home') return [2, 1.6];
+    return paved || area ? [0, 1.1] : [4, 4.0];
+  }
   if (hw === 'track') return paved ? [3, 2.4] : [4, 4.0];
   if (hw === 'service') return rank >= 3 ? [2, 1.5] : [3, 2.2];
   if (['residential', 'living_street', 'road', 'unclassified'].includes(hw)) {
@@ -48,7 +67,7 @@ function classify(t, w, town) {
     if (rank === 3) return [2, 1.35];
     // 町の外の生活道路（抜け道。歩道が無いことが多い）。住宅地の中の unclassified は住宅地の道と同じに見る
     // （上津台では住宅地の道の約半分が unclassified で書かれていて、「車に注意」になっていた。2026-10-15）
-    if (hw === 'unclassified' && !town) return [3, rank === 2 ? 2.2 : 2.6];
+    if (hw === 'unclassified' && !area) return [3, rank === 2 ? 2.2 : 2.6];
     if (rank === 1) return [3, 2.2];
     return [2, 1.6];
   }
@@ -133,7 +152,7 @@ export function buildGraph({ osm, areas = [], rdcl = [], elev = () => 0, bbox, c
   }
 
   // ---------- 町と森の範囲 ----------
-  const townPolys = [], woodPolys = [];
+  const areaPolys = [], woodPolys = []; // areaPolys: { ...poly, kind }
   for (const e of areas) {
     const t = e.tags ?? {}, kind = t.landuse ?? t.leisure ?? t.natural;
     const rings = e.type === 'way' ? [e.geometry] : (e.members ?? []).filter((m) => m.role === 'outer' && m.geometry).map((m) => m.geometry);
@@ -143,7 +162,7 @@ export function buildGraph({ osm, areas = [], rdcl = [], elev = () => 0, bbox, c
       let w = Infinity, s = Infinity, ea = -Infinity, n = -Infinity;
       for (const [x, y] of ring) { if (x < w) w = x; if (x > ea) ea = x; if (y < s) s = y; if (y > n) n = y; }
       const poly = { ring, w, e: ea, s, n };
-      if (kind === 'wood' || kind === 'forest') woodPolys.push(poly); else if (TOWN.has(kind)) townPolys.push(poly);
+      if (kind === 'wood' || kind === 'forest') woodPolys.push(poly); else if (AREA_KIND[kind]) areaPolys.push({ ...poly, kind: AREA_KIND[kind] });
     }
   }
   function inPoly(p, poly) {
@@ -155,10 +174,14 @@ export function buildGraph({ osm, areas = [], rdcl = [], elev = () => 0, bbox, c
     }
     return inside;
   }
-  // 道の真ん中あたりの点が町（住宅地・公園など）の中で、森の中ではない
-  const inTown = (coords) => {
+  // 道の真ん中あたりの点がある所の種類（公園 > 住宅地 > 店や学校の順に見る）。森の中・町の外は null
+  const RANK = { park: 0, home: 1, town: 2 };
+  const areaOf = (coords) => {
     const p = coords[Math.floor(coords.length / 2)];
-    return townPolys.some((q) => inPoly(p, q)) && !woodPolys.some((q) => inPoly(p, q));
+    if (woodPolys.some((q) => inPoly(p, q))) return null;
+    let best = null;
+    for (const q of areaPolys) if ((best === null || RANK[q.kind] < RANK[best]) && inPoly(p, q)) best = q.kind;
+    return best;
   };
 
   // ---------- 交差点で区切る ----------
@@ -172,8 +195,8 @@ export function buildGraph({ osm, areas = [], rdcl = [], elev = () => 0, bbox, c
     const t = w.tags;
     const coordsAll = w.nodes.map((n) => nodeById.get(n));
     const wm = matchWidth(coordsAll);
-    const [cls, cost0] = classify(t, wm, inTown(coordsAll));
-    const cost = cost0 * (t.lit === 'yes' && cls > 0 ? 0.95 : 1);
+    const [cls, cost0] = classify(t, wm, areaOf(coordsAll));
+    const cost = cost0 * CLASS_WEIGHT[cls] * (t.lit === 'yes' && cls > 0 ? 0.95 : 1);
     let start = 0;
     for (let i = 1; i < w.nodes.length; i++) {
       if (i < w.nodes.length - 1 && (useCount.get(w.nodes[i]) ?? 0) < 2) continue;

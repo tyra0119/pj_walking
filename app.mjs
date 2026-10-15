@@ -1,11 +1,11 @@
 // あんしん散歩道: スタート地点と歩く時間を決めると、なるべく安全な道を通ってスタートに戻る道順を作る
-import { Graph, makeLoops, routeGeometry, Progress } from './route.mjs?v=c9a0d9a-10152156';
-import { demSource, exaggerationFor } from './terrain.mjs?v=c9a0d9a-10152156';
-import { loadArea, bboxAround } from './area-loader.mjs?v=c9a0d9a-10152156';
+import { Graph, makeLoops, routeGeometry, Progress } from './route.mjs?v=2791efc-10152206';
+import { demSource, exaggerationFor } from './terrain.mjs?v=2791efc-10152206';
+import { loadArea, bboxAround } from './area-loader.mjs?v=2791efc-10152206';
 
 const $ = (id) => document.getElementById(id);
 const COLORS = ['#16a34a', '#2563eb', '#ca8a04', '#ea580c', '#dc2626'];
-const CLASS_NOTE = ['歩道・遊歩道・公園の道', '幅 5.5 m 以上の道。歩道がある見込みが高い', '車の少ない住宅地の道', '歩道の無い狭い車道・抜け道', '舗装されていない山道・階段'];
+const CLASS_NOTE = ['歩道・遊歩道・公園の道', '幅 5.5 m 以上の道。歩道がある見込みが高い', '住宅地の中の道・家と家の間の小道（防犯のため、なるべく通らない）', '歩道の無い狭い車道・抜け道', '舗装されていない山道・階段'];
 const MINUTES = [15, 20, 30, 45, 60, 90];
 const CENTER = [135.195, 34.865];
 const narrow = () => innerWidth <= 720;
@@ -453,7 +453,7 @@ $('btnFold').onclick = () => { $('panel').classList.toggle('folded'); syncFold()
 // ---------- 上津台の道の網を読む（前もって作ったもの。ほかの場所はスタートを置いて道順を作るときに読み込む） ----------
 (async () => {
   try {
-    const r = await fetch('./data/graph.json?v=c9a0d9a-10152156');
+    const r = await fetch('./data/graph.json?v=2791efc-10152206');
     const g = new Graph(await r.json());
     graphs.unshift(g);
     useGraph(g);

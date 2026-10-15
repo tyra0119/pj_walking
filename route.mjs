@@ -117,6 +117,7 @@ class MinHeap {
 }
 
 const REUSE = 4; // もう一度通る区間の重みの倍率
+export const WAYPOINT = { wide: true }; // 中継点を広い道に寄せるか（比べるときに切り替える）
 
 // 円の向き heading（ラジアン）・半径 r m で 1 つ輪を作る
 function tryLoop(G, start, heading, r, nWay) {
@@ -125,8 +126,14 @@ function tryLoop(G, start, heading, r, nWay) {
   for (let k = 1; k <= nWay; k++) {
     const a = heading + Math.PI + k * 2 * Math.PI / (nWay + 1);
     const [lon, lat] = G.toLonLat(cx + r * Math.cos(a), cy + r * Math.sin(a));
-    let { node, dist } = G.nearestNode(lon, lat, 2);
-    if (dist > Math.max(250, r * 0.6)) node = G.nearestNode(lon, lat).node;
+    // 中継点は、近くに広い道・歩行者の道があればその上に置く（住宅地の中に置くと、行き帰りに住宅地の道を通るため）。
+    // 無ければ住宅地の道まで、それも遠ければどの道でも
+    let node = -1;
+    if (WAYPOINT.wide) { const w = G.nearestNode(lon, lat, 1); if (w.dist <= Math.max(200, r * 0.45)) node = w.node; }
+    if (node < 0) {
+      const n2 = G.nearestNode(lon, lat, 2);
+      node = n2.dist <= Math.max(250, r * 0.6) ? n2.node : G.nearestNode(lon, lat).node;
+    }
     if (node !== pts[pts.length - 1]) pts.push(node);
   }
   pts.push(start);
