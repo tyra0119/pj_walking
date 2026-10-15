@@ -1,7 +1,7 @@
 // あんしん散歩道: スタート地点と歩く時間を決めると、なるべく安全な道を通ってスタートに戻る道順を作る
-import { Graph, makeLoops, routeGeometry, Progress } from './route.mjs?v=2791efc-10152206';
-import { demSource, exaggerationFor } from './terrain.mjs?v=2791efc-10152206';
-import { loadArea, bboxAround } from './area-loader.mjs?v=2791efc-10152206';
+import { Graph, makeLoops, routeGeometry, Progress } from './route.mjs?v=deeb75b-10152212';
+import { demSource, exaggerationFor } from './terrain.mjs?v=deeb75b-10152212';
+import { loadArea, bboxAround } from './area-loader.mjs?v=deeb75b-10152212';
 
 const $ = (id) => document.getElementById(id);
 const COLORS = ['#16a34a', '#2563eb', '#ca8a04', '#ea580c', '#dc2626'];
@@ -95,6 +95,11 @@ map.on('load', () => {
     'line-color': colorExpr, 'line-width': ['interpolate', ['linear'], ['zoom'], 13, 1.5, 17, 5], 'line-opacity': 0.75,
   } }, firstSymbol);
   // 道順
+  // 現在地の誤差の円
+  map.addSource('me-acc', { type: 'geojson', data: EMPTY });
+  map.addLayer({ id: 'me-acc-fill', type: 'fill', source: 'me-acc', paint: { 'fill-color': '#2563eb', 'fill-opacity': 0.12 } });
+  map.addLayer({ id: 'me-acc-line', type: 'line', source: 'me-acc', paint: { 'line-color': '#2563eb', 'line-opacity': 0.4, 'line-width': 1 } });
+  drawAccuracy();
   map.addSource('route', { type: 'geojson', data: EMPTY });
   map.addSource('route-all', { type: 'geojson', data: EMPTY });
   map.addLayer({ id: 'route-casing', type: 'line', source: 'route-all', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: {
@@ -145,30 +150,64 @@ map.addControl(buttons, 'bottom-right');
 const meEl = document.createElement('div');
 meEl.className = 'me';
 const meMarker = new maplibregl.Marker({ element: meEl });
-const waiters = [];
+// 現在地がずれる（2026-10-15 利用者「現在地がずいぶんとズレてる」）: 地図への描き方は正しかった（地形の立体でも点は
+// 正しい位置）。ブラウザが最初に返す位置は Wi-Fi・基地局からの粗い見積もりのことが多く、前はそれと 5 秒前までの古い位置を
+// そのまま使っていた。古い位置は使わず、誤差を円で出し、スタートにするときなどは誤差 GOOD_ACC m 以内になるまで少し待つ。
+// よい位置を受けたすぐ後に急に粗い位置が来たら採らない
+const GOOD_ACC = 50;
+let meAt = 0;
+const waiters = new Set();
 function startWatch() {
   if (watchId !== null || !navigator.geolocation) return;
   watchId = navigator.geolocation.watchPosition((p) => {
-    me = { lon: p.coords.longitude, lat: p.coords.latitude, acc: p.coords.accuracy };
+    const acc = p.coords.accuracy ?? 9999, now = Date.now();
+    if (me && acc > Math.max(100, me.acc * 3) && now - meAt < 20000) return;
+    me = { lon: p.coords.longitude, lat: p.coords.latitude, acc };
+    meAt = now;
     meMarker.setLngLat([me.lon, me.lat]).addTo(map);
+    drawAccuracy();
     buttons.locateBtn?.classList.add('on');
-    while (waiters.length) waiters.shift()(me);
+    for (const w of [...waiters]) w.check();
     onPosition();
   }, (err) => {
-    while (waiters.length) waiters.shift()(null);
+    for (const w of [...waiters]) w.done();
     if (err.code === err.PERMISSION_DENIED) { navigator.geolocation.clearWatch(watchId); watchId = null; }
-  }, { enableHighAccuracy: true, maximumAge: 5000, timeout: 20000 });
+  }, { enableHighAccuracy: true, maximumAge: 0, timeout: 30000 });
 }
-function getPosition(timeout = 8000) {
-  if (me) return Promise.resolve(me);
+// 誤差が want m 以内の位置を待つ。timeout までに来なければ、それまでのいちばん新しい位置（無ければ null）
+function getPosition({ timeout = 10000, want = GOOD_ACC } = {}) {
+  if (me && me.acc <= want && Date.now() - meAt < 15000) return Promise.resolve(me);
   if (!navigator.geolocation) return Promise.resolve(null);
   startWatch();
-  return new Promise((res) => { waiters.push(res); setTimeout(() => res(me), timeout); });
+  return new Promise((res) => {
+    const w = {
+      check: () => { if (me && me.acc <= want) w.done(); },
+      done: () => { if (!waiters.delete(w)) return; clearTimeout(t); res(me); },
+    };
+    const t = setTimeout(w.done, timeout);
+    waiters.add(w);
+    w.check();
+  });
 }
-// 現在地を画面の中ほどに。取れないとき（屋内・許可なし）は、歩いている道順の位置かスタート地点
+const warnAccuracy = (p) => { if (p && p.acc > 100) toast(`現在地の誤差が大きいです（約 ${Math.round(p.acc)} m）。屋外で GPS が使えると正確になります`); };
+// 誤差の円（薄い青）
+function drawAccuracy() {
+  const src = map.getSource('me-acc');
+  if (!src || !me) return;
+  const ring = [];
+  const dLat = me.acc / 111320, dLon = me.acc / (111320 * Math.cos(me.lat * Math.PI / 180));
+  for (let i = 0; i <= 64; i++) { const a = i / 64 * 2 * Math.PI; ring.push([me.lon + dLon * Math.cos(a), me.lat + dLat * Math.sin(a)]); }
+  src.setData({ type: 'Feature', properties: {}, geometry: { type: 'Polygon', coordinates: [ring] } });
+}
+// 現在地を画面の中ほどに。取れないとき（屋内・許可なし）は、スタート地点
 async function locateMe() {
-  const p = await getPosition();
-  if (p) { map.easeTo({ center: [p.lon, p.lat], zoom: Math.max(map.getZoom(), 16), duration: 700, offset: centerOffset() }); return; }
+  if (!me) toast('現在地を探しています…');
+  const p = await getPosition({ timeout: 6000 });
+  if (p) {
+    map.easeTo({ center: [p.lon, p.lat], zoom: Math.max(map.getZoom(), 16), duration: 700, offset: centerOffset() });
+    warnAccuracy(p);
+    return;
+  }
   if (start) {
     map.easeTo({ center: [start.lon, start.lat], duration: 700, offset: centerOffset() });
     toast('現在地が分からないので、スタート地点を出しました');
@@ -241,9 +280,12 @@ map.on('click', (e) => {
 });
 $('btnHere').onclick = async () => {
   $('btnHere').disabled = true;
-  const p = await getPosition();
+  $('btnHere').textContent = '探しています…';
+  const p = await getPosition({ timeout: 12000 });
   $('btnHere').disabled = false;
+  $('btnHere').textContent = '現在地にする';
   if (!p) { toast('現在地が分かりませんでした（位置情報の許可を確かめてください）'); return; }
+  warnAccuracy(p);
   setStart(p.lon, p.lat);
   map.easeTo({ center: [p.lon, p.lat], duration: 600, offset: centerOffset() });
 };
@@ -375,9 +417,10 @@ async function startWalking() {
   $('walkInfo').hidden = false;
   $('walkInfo').textContent = '現在地を探しています…';
   if (narrow()) { $('panel').classList.add('folded'); syncFold(); }
-  const p = await getPosition(15000);
+  const p = await getPosition({ timeout: 15000 });
   if (!walking) return;
   if (!p) { $('walkInfo').textContent = '現在地が分かりません。位置情報の許可を確かめてください'; return; }
+  warnAccuracy(p);
   map.easeTo({ center: [p.lon, p.lat], zoom: 17, pitch: 55, duration: 900, offset: centerOffset() });
   onPosition();
 }
@@ -396,8 +439,10 @@ function onPosition() {
   if (!arrived && s.along > progress.total * 0.7 && s.remain < 40) arrived = true;
   let html;
   if (arrived) html = '<b>おかえりなさい</b><br>スタート地点に戻りました';
-  else if (s.off > 60) html = `道順から <b>${Math.round(s.off)}</b> m 離れています。色の付いた道に戻ってください`;
+  // 位置の誤差より近ければ「離れている」とは言わない
+  else if (s.off > 60 && s.off > me.acc) html = `道順から <b>${Math.round(s.off)}</b> m 離れています。色の付いた道に戻ってください`;
   else html = `あと <b>${(s.remain / 1000).toFixed(1)}</b> km（約 ${mins} 分）<br><small>ここまで ${(s.along / 1000).toFixed(1)} km</small>`;
+  if (me.acc > 30) html += `<br><small>位置の誤差 約 ${Math.round(me.acc)} m</small>`;
   $('walkInfo').innerHTML = html;
   // 地図を動かした直後（20 秒）は追いかけない
   if (Date.now() - userMovedAt > 20000 && Date.now() - lastFollow > 3000 && !map.isMoving()) {
@@ -453,7 +498,7 @@ $('btnFold').onclick = () => { $('panel').classList.toggle('folded'); syncFold()
 // ---------- 上津台の道の網を読む（前もって作ったもの。ほかの場所はスタートを置いて道順を作るときに読み込む） ----------
 (async () => {
   try {
-    const r = await fetch('./data/graph.json?v=2791efc-10152206');
+    const r = await fetch('./data/graph.json?v=deeb75b-10152212');
     const g = new Graph(await r.json());
     graphs.unshift(g);
     useGraph(g);
