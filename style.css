@@ -1,0 +1,108 @@
+:root {
+  --bg: #ffffff;
+  --fg: #1f2937;
+  --muted: #6b7280;
+  --line: #e5e7eb;
+  --accent: #15803d;
+  --accent-soft: #dcfce7;
+  --shadow: 0 6px 24px rgba(15, 23, 42, 0.18);
+  --c0: #16a34a; /* 歩行者の道 */
+  --c1: #2563eb; /* 広い道 */
+  --c2: #ca8a04; /* 住宅地の道 */
+  --c3: #ea580c; /* 車に注意 */
+  --c4: #dc2626; /* 山道・階段 */
+  --sheet-h: 0px;
+  color-scheme: light;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: #e8ecef; color: var(--fg); font-family: system-ui, -apple-system, "Segoe UI", "Hiragino Sans", "Noto Sans JP", sans-serif; }
+#map { position: fixed; inset: 0; }
+button, select { font: inherit; color: inherit; }
+button { cursor: pointer; }
+
+/* ---------- 操作の欄（広い画面: 左上、狭い画面: 下） ---------- */
+#panel {
+  position: fixed; left: 12px; top: 12px; width: 340px; max-height: calc(100% - 24px);
+  display: flex; flex-direction: column;
+  background: var(--bg); border-radius: 14px; box-shadow: var(--shadow); z-index: 5; overflow: hidden;
+}
+#panel .head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 12px 14px 8px; border-bottom: 1px solid var(--line); }
+#panel h1 { margin: 0; font-size: 18px; color: var(--accent); letter-spacing: 0.02em; }
+#panel .sub { margin: 2px 0 0; font-size: 12px; color: var(--muted); }
+#panel .tools { display: flex; gap: 4px; }
+#panel .tools button { border: 1px solid var(--line); background: #fff; border-radius: 8px; padding: 4px 8px; font-size: 13px; }
+#panel .tools .fold { display: none; width: 38px; font-size: 16px; line-height: 1; }
+#panel .body { padding: 10px 14px 14px; overflow-y: auto; }
+.row { display: flex; align-items: center; gap: 10px; margin: 8px 0; }
+.row .label { flex: 0 0 64px; font-size: 13px; color: var(--muted); }
+.start { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; }
+.start b { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.small { border: 1px solid var(--line); background: #fff; border-radius: 8px; padding: 4px 8px; font-size: 12px; white-space: nowrap; }
+.hint { margin: -2px 0 6px 74px; font-size: 12px; color: var(--muted); }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chips button { border: 1px solid var(--line); background: #fff; border-radius: 999px; padding: 5px 11px; font-size: 14px; }
+.chips button[aria-checked="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+select { flex: 1; border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; background: #fff; }
+.primary { width: 100%; margin: 10px 0 4px; padding: 11px; border: 0; border-radius: 10px; background: var(--accent); color: #fff; font-size: 16px; font-weight: 700; }
+.primary:disabled { opacity: 0.6; cursor: progress; }
+
+#result { margin-top: 10px; border-top: 1px solid var(--line); padding-top: 10px; }
+.summary { display: flex; justify-content: space-between; text-align: center; }
+.summary div { flex: 1; }
+.summary b { font-size: 24px; }
+.summary span { margin-left: 2px; font-size: 12px; color: var(--muted); }
+.bar { display: flex; height: 12px; border-radius: 6px; overflow: hidden; margin: 10px 0 6px; background: var(--line); }
+.bar i { display: block; height: 100%; }
+.legend { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12px; }
+.legend li { display: flex; align-items: center; gap: 5px; }
+.legend li::before { content: ""; width: 14px; height: 5px; border-radius: 3px; background: var(--c); }
+.legend li span { color: var(--muted); }
+.legend.big { flex-direction: column; font-size: 14px; }
+.legend.big li { align-items: baseline; }
+.legend.big li::before { flex: 0 0 18px; height: 6px; transform: translateY(-2px); }
+.btns { display: flex; gap: 8px; margin-top: 10px; }
+.btns button { flex: 1; padding: 9px; border-radius: 10px; border: 1px solid var(--line); background: #fff; font-weight: 600; }
+.btns .go { background: var(--accent-soft); border-color: #86efac; color: #14532d; }
+.btns .go[aria-pressed="true"] { background: #14532d; color: #fff; }
+#rIdx { font-weight: 400; color: var(--muted); font-size: 12px; }
+#walkInfo { margin-top: 8px; padding: 8px 10px; border-radius: 8px; background: #f0fdf4; font-size: 14px; }
+#walkInfo b { font-size: 18px; }
+.check { display: flex; gap: 6px; align-items: center; margin-top: 12px; font-size: 13px; }
+.note { margin: 8px 0 0; font-size: 11px; line-height: 1.5; color: var(--muted); }
+
+#toast { position: fixed; left: 50%; top: 14px; transform: translateX(-50%); z-index: 20; background: rgba(17, 24, 39, 0.9); color: #fff; padding: 8px 14px; border-radius: 10px; font-size: 14px; max-width: calc(100% - 32px); }
+
+dialog { border: 0; border-radius: 14px; box-shadow: var(--shadow); max-width: min(520px, calc(100% - 32px)); padding: 18px 20px; line-height: 1.6; }
+dialog h2 { margin: 0 0 8px; font-size: 18px; }
+dialog h3 { margin: 14px 0 6px; font-size: 15px; }
+dialog ol, dialog ul { padding-left: 20px; }
+dialog form { text-align: right; margin-top: 12px; }
+dialog form button { padding: 6px 16px; border-radius: 8px; border: 1px solid var(--line); background: #fff; }
+
+/* ---------- 地図のボタン（右下に縦に。上から 方角・現在地・拡大・縮小） ---------- */
+.maplibregl-ctrl-bottom-right { bottom: var(--sheet-h); }
+.wk-ctrl { display: flex; flex-direction: column; gap: 10px; align-items: flex-end; }
+.wk-ctrl button { width: 44px; height: 44px; border: 0; background: #fff; display: grid; place-items: center; padding: 0; }
+.wk-ctrl .one { border-radius: 50%; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25); }
+.wk-ctrl .pair { display: flex; flex-direction: column; border-radius: 10px; overflow: hidden; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25); }
+.wk-ctrl .pair button + button { border-top: 1px solid var(--line); }
+.wk-ctrl svg { width: 24px; height: 24px; }
+.wk-ctrl .locate.on svg { color: #2563eb; }
+
+/* 出発地のピン・現在地 */
+.pin { width: 34px; height: 44px; cursor: grab; }
+.pin svg { width: 100%; height: 100%; filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.35)); }
+.me { width: 18px; height: 18px; border-radius: 50%; background: #2563eb; border: 3px solid #fff; box-shadow: 0 0 0 6px rgba(37, 99, 235, 0.25); }
+
+/* ---------- 狭い画面: 下に出す（たためる） ---------- */
+@media (max-width: 720px) {
+  #panel { left: 0; right: 0; top: auto; bottom: 0; width: auto; max-height: 52%; border-radius: 16px 16px 0 0; padding-bottom: env(safe-area-inset-bottom); }
+  #panel .head { padding: 10px 14px 6px; }
+  #panel h1 { font-size: 16px; }
+  #panel .tools .fold { display: block; }
+  #panel.folded .body > :not(#result) { display: none; }
+  #panel.folded #result { margin-top: 0; border-top: 0; padding-top: 0; }
+  #panel.folded #result .legend, #panel.folded #result .bar { display: none; }
+  #panel.folded .body:has(#result[hidden]) { display: none; }
+  .maplibregl-ctrl-bottom-left { bottom: var(--sheet-h); }
+}

@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8"><meta name="build" content="3b74fde-10152124">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>あんしん散歩道（上津台）</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22%3E%3Crect width=%2232%22 height=%2232%22 rx=%227%22 fill=%22%23166534%22/%3E%3Cpath d=%22M16 6c-5 0-9 3.6-9 8.5S11 26 16 26s9-6.6 9-11.5S21 6 16 6z%22 fill=%22none%22 stroke=%22%23bbf7d0%22 stroke-width=%223%22/%3E%3Ccircle cx=%2216%22 cy=%2226%22 r=%223.2%22 fill=%22%23fde047%22/%3E%3C/svg%3E">
+<meta name="description" content="スタート地点と歩く時間を決めると、なるべく安全な道（歩行者の道・広い道）を通って、スタートに戻ってくる散歩の道順を作ります。神戸市北区上津台。">
+<link rel="preconnect" href="https://basemaps.cartocdn.com" crossorigin>
+<link rel="preconnect" href="https://tiles.basemaps.cartocdn.com" crossorigin>
+<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
+<link rel="stylesheet" href="./style.css?v=3b74fde-10152124">
+<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+</head>
+<body>
+<div id="map"></div>
+
+<section id="panel" aria-label="散歩の道順">
+  <header class="head">
+    <div>
+      <h1>あんしん散歩道</h1>
+      <p class="sub">神戸市北区上津台</p>
+    </div>
+    <div class="tools">
+      <button type="button" id="btnHelp">使い方</button>
+      <button type="button" id="btnSources">出典</button>
+      <button type="button" id="btnFold" class="fold" aria-expanded="true" aria-label="たたむ">▾</button>
+    </div>
+  </header>
+
+  <div class="body">
+    <div class="row">
+      <div class="label">スタート</div>
+      <div class="start">
+        <b id="startLabel">上津台</b>
+        <button type="button" id="btnHere" class="small">現在地にする</button>
+      </div>
+    </div>
+    <p class="hint" id="startHint">地図をタップするか、ピンを動かして決めます</p>
+
+    <div class="row">
+      <div class="label">歩く時間</div>
+      <div class="chips" id="minutes" role="radiogroup" aria-label="歩く時間"></div>
+    </div>
+    <div class="row">
+      <div class="label">歩く速さ</div>
+      <select id="speed" aria-label="歩く速さ">
+        <option value="3.5">ゆっくり（時速 3.5 km）</option>
+        <option value="4.5" selected>ふつう（時速 4.5 km）</option>
+        <option value="5.5">はやめ（時速 5.5 km）</option>
+      </select>
+    </div>
+
+    <button type="button" id="btnMake" class="primary">道順を作る</button>
+
+    <div id="result" hidden>
+      <div class="summary">
+        <div><b id="rDist">-</b><span>km</span></div>
+        <div><b id="rTime">-</b><span>分</span></div>
+        <div><b id="rUp">-</b><span>m 上る</span></div>
+      </div>
+      <div class="bar" id="rBar" aria-label="通る道の内訳"></div>
+      <ul class="legend" id="rLegend"></ul>
+      <div class="btns">
+        <button type="button" id="btnNext">別の道順 <span id="rIdx"></span></button>
+        <button type="button" id="btnWalk" class="go">歩きはじめる</button>
+      </div>
+      <div id="walkInfo" hidden></div>
+    </div>
+
+    <label class="check"><input type="checkbox" id="showNet"> まわりの道を安全さで色分けして見る</label>
+    <p class="note">歩道があるかどうかは、地図のデータに書かれていないことが多いため、道の種類と幅から見当を付けています。安全を約束するものではありません。歩くときは周りに気をつけてください。</p>
+  </div>
+</section>
+
+<div id="toast" role="status" hidden></div>
+
+<dialog id="dlgHelp">
+  <h2>使い方</h2>
+  <ol>
+    <li>地図をタップするか、緑のピンを動かして<b>スタート地点</b>を決めます（「現在地にする」でも）。</li>
+    <li><b>歩く時間</b>と<b>歩く速さ</b>を選び、「道順を作る」を押します。</li>
+    <li>スタートに戻ってくる輪の道順が、道の安全さの色で出ます。矢印が進む向きです。気に入らなければ「別の道順」。</li>
+    <li>「歩きはじめる」を押すと現在地を追いかけ、あとどのくらいかを出します。</li>
+  </ol>
+  <h3>道の色（安全さの見当）</h3>
+  <ul class="legend big" id="helpLegend"></ul>
+  <p>できるだけ<b>歩行者の道</b>と<b>広い道</b>を選び、<b>車に注意</b>・<b>山道・階段</b>はなるべく避けます。同じ道を行って戻るだけの道順も避けます。</p>
+  <h3>地図の操作</h3>
+  <ul>
+    <li>マウス: 左ドラッグで移動、右ドラッグで回転と傾き、ホイールで拡大・縮小</li>
+    <li>指: 1 本で移動。2 本でひねると回転、広げる・狭めると拡大・縮小、2 本そろえて上下に動かすと傾き</li>
+    <li>右下のボタン: 方角（押すと北が上・真上から）、現在地、拡大、縮小</li>
+  </ul>
+  <form method="dialog"><button>閉じる</button></form>
+</dialog>
+
+<dialog id="dlgSources">
+  <h2>出典</h2>
+  <ul>
+    <li>道の形とつながり・道の種類: © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap contributors</a>（ODbL）<span id="osmDate"></span></li>
+    <li>道幅の区分・公園の道: <a href="https://maps.gsi.go.jp/development/ichiran.html" target="_blank" rel="noopener">国土地理院 地理院タイル（道路中心線）</a></li>
+    <li>地形の立体・上り下り: <a href="https://maps.gsi.go.jp/development/ichiran.html" target="_blank" rel="noopener">国土地理院 地理院タイル（標高）</a></li>
+    <li>背景の地図: © <a href="https://carto.com/attributions" target="_blank" rel="noopener">CARTO</a>、© OpenStreetMap contributors</li>
+    <li>町名: <a href="https://maps.gsi.go.jp/development/api.html" target="_blank" rel="noopener">国土地理院 逆ジオコーダ</a></li>
+  </ul>
+  <form method="dialog"><button>閉じる</button></form>
+</dialog>
+
+<script type="module" src="./app.mjs?v=3b74fde-10152124"></script>
+</body>
+</html>
