@@ -1,7 +1,7 @@
 // あんしん散歩道: スタート地点と歩く時間を決めると、なるべく安全な道を通ってスタートに戻る道順を作る
-import { Graph, makeLoops, routeGeometry, Progress, routeTurns } from './route.mjs?v=5ee49af-10152253';
-import { demSource, exaggerationFor } from './terrain.mjs?v=5ee49af-10152253';
-import { loadArea, bboxAround } from './area-loader.mjs?v=5ee49af-10152253';
+import { Graph, makeLoops, routeGeometry, Progress, routeTurns } from './route.mjs?v=e14aad4-10152305';
+import { demSource, exaggerationFor } from './terrain.mjs?v=e14aad4-10152305';
+import { loadArea, bboxAround } from './area-loader.mjs?v=e14aad4-10152305';
 
 const $ = (id) => document.getElementById(id);
 const COLORS = ['#16a34a', '#2563eb', '#ca8a04', '#ea580c', '#dc2626'];
@@ -11,7 +11,9 @@ const CENTER = [135.195, 34.865];
 const narrow = () => innerWidth <= 720;
 // スマホ（指で触る・狭い画面）: 地図を軽くする（2026-10-15 利用者「スマホで見ると地図スクロールが重い」）。
 // 画面の細かさを 1.5 倍まで（iPhone は 3 倍で、描く画素が 4 倍だった）、地形の陰影なし、標高は一段粗く、
-// 建物の立体はもう一段近づいてから、傾きは浅め。標高の変換は別のスレッド（web/dem-worker.js）
+// 建物の立体はもう一段近づいてから、傾きは浅め、番地と店の名前は出さない。標高の変換は別のスレッド（web/dem-worker.js）。
+// 実機（Xperia SO-51A）で測ると、重さのほとんどは地形の立体（文字を地面の高さに置き直す処理）。地形ありで 1 秒 37〜41 コマ、
+// 地形なしで 60 コマ。フェード（fadeDuration）を 0 にすると文字の置き直しが毎コマ走り 28 コマ・画面が 1.2 秒止まったので標準のまま
 const MOBILE = matchMedia('(pointer: coarse)').matches || innerWidth < 760;
 const load = (k, d) => { try { return localStorage.getItem(k) ?? d; } catch { return d; } };
 const save = (k, v) => { try { localStorage.setItem(k, v); } catch { /* 使えなくてもよい */ } };
@@ -35,7 +37,6 @@ const map = new maplibregl.Map({
   center: CENTER, zoom: 15.2, pitch: MOBILE ? 45 : 50, bearing: -15,
   minZoom: 11, maxZoom: 19, maxPitch: MOBILE ? 60 : 70,
   pixelRatio: Math.min(devicePixelRatio || 1, MOBILE ? 1.5 : 2),
-  fadeDuration: MOBILE ? 0 : 300,
   pitchWithRotate: true, // 右ドラッグで回転と傾き
   attributionControl: { compact: true, customAttribution: '道: © OpenStreetMap contributors、国土地理院' },
 });
@@ -67,6 +68,8 @@ function arrowImage() {
 const EMPTY = { type: 'FeatureCollection', features: [] };
 map.on('load', () => {
   japaneseLabels();
+  // スマホ: 番地と店の名前は出さない（地形の立体では文字を置き直すのが重い。町名・公園・道の名前は出す）
+  if (MOBILE) for (const l of map.getStyle().layers) if (l.type === 'symbol' && /housenumber|^poi_(?!park)/.test(l.id)) map.setLayoutProperty(l.id, 'visibility', 'none');
   // 出典は「i」にたたんでおく（狭い画面で地図の下を大きく覆っていた）
   document.querySelector('.maplibregl-ctrl-attrib')?.classList.remove('maplibregl-compact-show');
   const layers = map.getStyle().layers;
@@ -136,22 +139,20 @@ map.on('load', () => {
   updateNet();
 });
 map.on('zoom', () => { if (map.getTerrain()) map.terrain.exaggeration = exaggerationFor(map.getZoom()); });
-// 立体表示（地形と建物）の切り替え。重い機種では外すと平らな地図になる（陰影はそのまま）
-let show3d = load('wk.3d', '1') === '1';
+// 地形（山や坂）の立体の切り替え。重いのはほとんど地形なので、外しても建物の立体と傾きは残す（実機で 1 秒 39 → 60 コマ）。
+// スマホは最初は外しておく（BusTracker も地形の立体は選んだ人だけ）。パソコンは最初から立体
+let show3d = load('wk.terrain', MOBILE ? '0' : '1') === '1';
 $('show3d').checked = show3d;
 function apply3d() {
   if (!map.getSource('dem')) return;
   map.setTerrain(show3d ? { source: 'dem', exaggeration: exaggerationFor(map.getZoom()) } : null);
-  if (map.getLayer('bldg-3d')) map.setLayoutProperty('bldg-3d', 'visibility', show3d ? 'visible' : 'none');
 }
 map.on('load', apply3d);
 $('show3d').onchange = (e) => {
   show3d = e.target.checked;
-  save('wk.3d', show3d ? '1' : '0');
+  save('wk.terrain', show3d ? '1' : '0');
   apply3d();
-  map.easeTo({ pitch: show3d ? (MOBILE ? 45 : 50) : 0, duration: 600 });
 };
-if (!show3d) map.setPitch(0);
 
 // ---------- 地図のボタン（右下に縦に。上から 方角・現在地・拡大・縮小） ----------
 const ICON = {
@@ -581,7 +582,7 @@ $('btnFold').onclick = () => { $('panel').classList.toggle('folded'); syncFold()
 // ---------- 上津台の道の網を読む（前もって作ったもの。ほかの場所はスタートを置いて道順を作るときに読み込む） ----------
 (async () => {
   try {
-    const r = await fetch('./data/graph.json?v=5ee49af-10152253');
+    const r = await fetch('./data/graph.json?v=e14aad4-10152305');
     const g = new Graph(await r.json());
     graphs.unshift(g);
     useGraph(g);

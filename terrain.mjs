@@ -50,7 +50,7 @@ function getWorker() {
   if (!workerOk) return null;
   if (!worker) {
     try {
-      worker = new Worker(new URL('./dem-worker.js?v=5ee49af-10152253', import.meta.url));
+      worker = new Worker(new URL('./dem-worker.js?v=e14aad4-10152305', import.meta.url));
       worker.onmessage = (ev) => { const w = waiting.get(ev.data.id); if (!w) return; waiting.delete(ev.data.id); w.resolve(ev.data); };
       worker.onerror = () => { workerOk = false; for (const w of waiting.values()) w.resolve({ error: 'worker' }); waiting.clear(); };
     } catch { workerOk = false; return null; }
