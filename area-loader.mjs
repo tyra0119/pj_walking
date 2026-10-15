@@ -2,7 +2,7 @@
 //  - OpenStreetMap の道と、町・森の範囲: Overpass API（1 回の問い合わせで両方）
 //  - 国土地理院の道路中心線（ズーム 16 の GeoJSON）と標高（ズーム 14 の PNG）
 // 作り方は上津台の分と同じ（web/graph-build.mjs）
-import { buildGraph, elevFromTiles, tilesOf } from './graph-build.mjs?v=deeb75b-10152212';
+import { buildGraph, elevFromTiles, tilesOf } from './graph-build.mjs?v=25f4730-10152218';
 
 const RAD = Math.PI / 180;
 // 公開の Overpass は混んでいると断る・止まることが多い（2026-10-15 に試すと overpass-api.de 406、kumi・private.coffee 500、

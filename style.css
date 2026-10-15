@@ -65,6 +65,20 @@ select { flex: 1; border: 1px solid var(--line); border-radius: 8px; padding: 6p
 .btns .go { background: var(--accent-soft); border-color: #86efac; color: #14532d; }
 .btns .go[aria-pressed="true"] { background: #14532d; color: #fff; }
 #rIdx { font-weight: 400; color: var(--muted); font-size: 12px; }
+/* 曲がり角の一覧 */
+#turnsBox { margin-top: 10px; border: 1px solid var(--line); border-radius: 10px; }
+#turnsBox summary { cursor: pointer; padding: 8px 10px; font-size: 14px; font-weight: 600; }
+#turnsBox summary small { margin-left: 8px; font-weight: 400; font-size: 11px; color: var(--muted); }
+#turnList { list-style: none; margin: 0; padding: 0 6px 6px; max-height: 240px; overflow-y: auto; }
+#turnList button { display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px; border: 0; border-top: 1px solid var(--line); background: none; text-align: left; font-size: 13px; }
+#turnList button:hover { background: #f3f4f6; }
+#turnList .no { flex: 0 0 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; background: #1f2937; color: #fff; font-size: 11px; font-weight: 700; }
+#turnList .no.s { background: var(--accent); }
+#turnList .what { flex: 1; min-width: 0; }
+#turnList .what small { display: block; color: var(--muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#turnList .sv { flex: 0 0 auto; color: #2563eb; font-size: 12px; }
+.turn-pop .maplibregl-popup-content { padding: 10px 12px; border-radius: 10px; font-size: 13px; line-height: 1.5; }
+.turn-pop a { display: inline-block; margin-top: 4px; color: #2563eb; font-weight: 600; }
 #walkInfo { margin-top: 8px; padding: 8px 10px; border-radius: 8px; background: #f0fdf4; font-size: 14px; }
 #walkInfo b { font-size: 18px; }
 .check { display: flex; gap: 6px; align-items: center; margin-top: 12px; font-size: 13px; }
@@ -105,6 +119,6 @@ dialog form button { padding: 6px 16px; border-radius: 8px; border: 1px solid va
   #panel.folded .body:has(#result:not([hidden])) #btnMake { display: none; }
   #panel.folded #btnMake { margin-top: 0; }
   #panel.folded #result { margin-top: 0; border-top: 0; padding-top: 0; }
-  #panel.folded #result .legend, #panel.folded #result .bar { display: none; }
+  #panel.folded #result .legend, #panel.folded #result .bar, #panel.folded #turnsBox { display: none; }
   .maplibregl-ctrl-bottom-left { bottom: var(--sheet-h); }
 }

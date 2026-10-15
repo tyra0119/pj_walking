@@ -287,3 +287,51 @@ export class Progress {
     return best;
   }
 }
+
+/**
+ * 道順の曲がり角（2026-10-15 利用者「曲がり角の一覧を作って、押したら曲がった先の向きでストリートビューを開く」）。
+ * 道が 3 本以上集まる交差点で、進む向きが 35° 以上変わる所。向きは曲がる手前 15 m と曲がった先 15 m の点から見る
+ * （交差点のすぐそばの短い線の向きに振り回されないように）。15 m 以内に続けて曲がる所は 1 つにまとめる（ずれた交差点の折れ）。
+ * 返り値の先頭はスタート（kind: 'start'）。heading は曲がった先（スタートは歩きだす）向き（北 0°・時計回り）、angle は右が +
+ */
+export function routeTurns(G, path) {
+  if (!path.length) return [];
+  const brg = (a, b) => (Math.atan2((b[0] - a[0]) * G.kx, (b[1] - a[1]) * G.ky) * 180 / Math.PI + 360) % 360;
+  const segLen = (a, b) => Math.hypot((b[0] - a[0]) * G.kx, (b[1] - a[1]) * G.ky);
+  // 点の並び c の先頭から d m 進んだ所
+  const at = (c, d) => {
+    let s = 0;
+    for (let i = 1; i < c.length; i++) {
+      const L = segLen(c[i - 1], c[i]);
+      if (s + L >= d && L > 0) { const t = (d - s) / L; return [c[i - 1][0] + (c[i][0] - c[i - 1][0]) * t, c[i - 1][1] + (c[i][1] - c[i - 1][1]) * t]; }
+      s += L;
+    }
+    return c[c.length - 1];
+  };
+  // 向きを見る線: 交差点から先（後ろ）へ、区間をまたいで 15 m ぶん
+  const ahead = (k) => { const c = []; for (let j = k; j < path.length && (c.length < 2 || segLen(c[0], c[c.length - 1]) < 15); j++) { const q = G.coordsOf(path[j].e, path[j].fwd); c.push(...(c.length ? q.slice(1) : q)); } return c; };
+  const behind = (k) => { const c = []; for (let j = k; j >= 0 && (c.length < 2 || segLen(c[0], c[c.length - 1]) < 15); j--) { const q = G.coordsOf(path[j].e, !path[j].fwd); c.push(...(c.length ? q.slice(1) : q)); } return c; };
+  const nameOf = (e) => G.names[G.name[e]] || '';
+  const first = ahead(0);
+  const out = [{ kind: 'start', lon: first[0][0], lat: first[0][1], along: 0, angle: 0, heading: brg(first[0], at(first, 15)), name: nameOf(path[0].e) }];
+  let along = 0;
+  for (let i = 0; i < path.length - 1; i++) {
+    const { e, fwd } = path[i];
+    along += G.len[e];
+    const v = fwd ? G.eb[e] : G.ea[e];
+    if (G.adjStart[v + 1] - G.adjStart[v] < 3) continue; // 分かれ道の無い曲がり（道なりに進む）
+    const cin = behind(i), cout = ahead(i + 1);
+    const hin = brg(at(cin, 15), cin[0]), hout = brg(cout[0], at(cout, 15));
+    const ang = ((hout - hin + 540) % 360) - 180;
+    const last = out[out.length - 1];
+    if (last.kind === 'turn' && along - last.along < 15) {
+      // すぐ続けて曲がる: 1 つにまとめる（合わせてほぼまっすぐなら曲がり角にしない）
+      const sum = ((last.angle + ang + 540) % 360) - 180;
+      if (Math.abs(sum) < 35) out.pop(); else Object.assign(last, { angle: sum, heading: hout, name: nameOf(path[i + 1].e) });
+      continue;
+    }
+    if (Math.abs(ang) < 35) continue;
+    out.push({ kind: 'turn', lon: G.lon[v], lat: G.lat[v], along, angle: ang, heading: hout, name: nameOf(path[i + 1].e) });
+  }
+  return out;
+}

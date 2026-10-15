@@ -1,7 +1,7 @@
 // あんしん散歩道: スタート地点と歩く時間を決めると、なるべく安全な道を通ってスタートに戻る道順を作る
-import { Graph, makeLoops, routeGeometry, Progress } from './route.mjs?v=deeb75b-10152212';
-import { demSource, exaggerationFor } from './terrain.mjs?v=deeb75b-10152212';
-import { loadArea, bboxAround } from './area-loader.mjs?v=deeb75b-10152212';
+import { Graph, makeLoops, routeGeometry, Progress, routeTurns } from './route.mjs?v=25f4730-10152218';
+import { demSource, exaggerationFor } from './terrain.mjs?v=25f4730-10152218';
+import { loadArea, bboxAround } from './area-loader.mjs?v=25f4730-10152218';
 
 const $ = (id) => document.getElementById(id);
 const COLORS = ['#16a34a', '#2563eb', '#ca8a04', '#ea580c', '#dc2626'];
@@ -19,6 +19,7 @@ let speed = +load('wk.speed', 4.5);
 let start = null;          // { lon, lat }（道の網の中なら近くの交差点に寄せた位置）
 let routes = [], idx = 0;  // 作った道順の候補と、いま出している番号
 let geom = null;           // いまの道順の形
+let turns = [];            // いまの道順の曲がり角（先頭はスタート）
 let walking = false, progress = null, arrived = false;
 let me = null;             // 現在地 { lon, lat, acc }
 let watchId = null;
@@ -109,10 +110,22 @@ map.on('load', () => {
     'line-color': colorExpr, 'line-width': ['interpolate', ['linear'], ['zoom'], 13, 4, 17, 10],
   } });
   map.addImage('arrow', arrowImage(), { pixelRatio: 2 });
+  // 曲がり角の番号の印（押すとストリートビュー）
+  map.addSource('turns', { type: 'geojson', data: EMPTY });
   map.addLayer({ id: 'route-arrows', type: 'symbol', source: 'route-all', minzoom: 14, layout: {
     'symbol-placement': 'line', 'symbol-spacing': ['interpolate', ['linear'], ['zoom'], 14, 70, 18, 140], 'icon-image': 'arrow',
     'icon-size': ['interpolate', ['linear'], ['zoom'], 14, 0.7, 18, 1.2], 'icon-allow-overlap': true, 'icon-ignore-placement': true, 'icon-rotation-alignment': 'map',
   } });
+  map.addLayer({ id: 'turns', type: 'circle', source: 'turns', minzoom: 13, paint: {
+    'circle-radius': ['interpolate', ['linear'], ['zoom'], 13, 6, 17, 11], 'circle-color': '#1f2937', 'circle-stroke-color': '#ffffff', 'circle-stroke-width': 2,
+  } });
+  map.addLayer({ id: 'turns-no', type: 'symbol', source: 'turns', minzoom: 14, layout: {
+    'text-field': ['to-string', ['get', 'no']], 'text-font': ['Montserrat Medium', 'Open Sans Bold', 'Noto Sans Regular'],
+    'text-size': ['interpolate', ['linear'], ['zoom'], 14, 9, 17, 12], 'text-allow-overlap': true, 'text-ignore-placement': true,
+  }, paint: { 'text-color': '#ffffff' } });
+  map.on('mouseenter', 'turns', () => { map.getCanvas().style.cursor = 'pointer'; });
+  map.on('mouseleave', 'turns', () => { map.getCanvas().style.cursor = ''; });
+  showTurns(turns);
   updateNet();
 });
 map.on('zoom', () => { if (map.getTerrain()) map.terrain.exaggeration = exaggerationFor(map.getZoom()); });
@@ -275,6 +288,9 @@ async function placeName(lon, lat) {
 }
 // 地図をタップするとスタートをそこへ（道順を出していても。案内の途中だけは動かさない）
 map.on('click', (e) => {
+  // 曲がり角の印を押したときは、スタートを動かさずに説明を出す
+  const hit = map.getLayer('turns') && map.queryRenderedFeatures([[e.point.x - 8, e.point.y - 8], [e.point.x + 8, e.point.y + 8]], { layers: ['turns'] })[0];
+  if (hit) { showTurnPopup(+hit.properties.i); return; }
   if (walking) { toast('案内の途中です。スタートを変えるときは「案内をやめる」を押してください'); return; }
   setStart(e.lngLat.lng, e.lngLat.lat);
 });
@@ -361,6 +377,7 @@ function showRoute(fit = false) {
   $('rLegend').innerHTML = pct.map((p, i) => (p >= 0.5 ? `<li style="--c:${COLORS[i]}">${G.classes[i]} <span>${Math.round(p)}%</span></li>` : '')).join('');
   progress = new Progress(G, geom.coords);
   arrived = false;
+  showTurns(routeTurns(G, r.path));
   $('startHint').textContent = '地図をタップするか、ピンを動かすとスタートが変わります';
   // 狭い画面: 欄をたたんで結果だけにし、高さが決まってから道順に合わせる
   if (fit && narrow()) { $('panel').classList.add('folded'); syncFold(); measureSheet(); }
@@ -369,6 +386,7 @@ function showRoute(fit = false) {
 }
 function clearRoute() {
   routes = []; idx = 0; geom = null; progress = null;
+  showTurns([]);
   map.getSource('route')?.setData(EMPTY);
   map.getSource('route-all')?.setData(EMPTY);
   $('result').hidden = true;
@@ -442,6 +460,8 @@ function onPosition() {
   // 位置の誤差より近ければ「離れている」とは言わない
   else if (s.off > 60 && s.off > me.acc) html = `道順から <b>${Math.round(s.off)}</b> m 離れています。色の付いた道に戻ってください`;
   else html = `あと <b>${(s.remain / 1000).toFixed(1)}</b> km（約 ${mins} 分）<br><small>ここまで ${(s.along / 1000).toFixed(1)} km</small>`;
+  const next = !arrived && turns.find((t) => t.kind === 'turn' && t.along > s.along + 5);
+  if (next) html += `<br>次は <b>${Math.round(next.along - s.along)}</b> m 先で${turnText(next)}`;
   if (me.acc > 30) html += `<br><small>位置の誤差 約 ${Math.round(me.acc)} m</small>`;
   $('walkInfo').innerHTML = html;
   // 地図を動かした直後（20 秒）は追いかけない
@@ -449,6 +469,46 @@ function onPosition() {
     lastFollow = Date.now();
     map.easeTo({ center: [me.lon, me.lat], duration: 800, offset: centerOffset() });
   }
+}
+
+// ---------- 曲がり角とストリートビュー ----------
+// Google マップの URL でストリートビューを開く（API キー不要。別のタブ、スマホでは Google マップのアプリ）。
+// heading は曲がった先の向き（北 0°・時計回り）なので、その角を曲がった先の景色から見られる
+const svUrl = (t) => `https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${t.lat.toFixed(6)},${t.lon.toFixed(6)}&heading=${Math.round(t.heading)}&pitch=0&fov=90`;
+const COMPASS = ['北', '北東', '東', '南東', '南', '南西', '西', '北西'];
+const compass = (h) => COMPASS[Math.round(h / 45) % 8];
+function turnText(t) {
+  if (t.kind === 'start') return `${compass(t.heading)}へ歩きだす`;
+  const side = t.angle > 0 ? '右' : '左', a = Math.abs(t.angle);
+  return a >= 135 ? `大きく${side}へ（折り返すように）` : a >= 60 ? `${side}へ曲がる` : `ななめ${side}へ`;
+}
+const fmtDist = (m) => (m < 1000 ? `${Math.round(m / 10) * 10} m` : `${(m / 1000).toFixed(1)} km`);
+const ESC = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+const escapeHtml = (s) => s.replace(/[&<>"']/g, (c) => ESC[c]);
+let turnPopup = null;
+function showTurns(list) {
+  turns = list;
+  turnPopup?.remove();
+  map.getSource('turns')?.setData({ type: 'FeatureCollection', features: list.map((t, i) => (t.kind === 'turn' ? { type: 'Feature', properties: { i, no: i }, geometry: { type: 'Point', coordinates: [t.lon, t.lat] } } : null)).filter(Boolean) });
+  $('turnCount').textContent = list.length > 1 ? `${list.length - 1} か所` : '';
+  $('turnList').innerHTML = list.map((t, i) => `<li><button type="button" data-i="${i}">
+    <span class="no${t.kind === 'start' ? ' s' : ''}">${t.kind === 'start' ? 'S' : i}</span>
+    <span class="what">${t.kind === 'start' ? 'スタートから' : fmtDist(t.along) + ' 先で'}${turnText(t)}<small>${t.name ? escapeHtml(t.name) + ' ・ ' : ''}${compass(t.heading)}向き</small></span>
+    <span class="sv">ストリートビュー ↗</span></button></li>`).join('');
+}
+$('turnList').addEventListener('click', (e) => {
+  const b = e.target.closest('button[data-i]');
+  if (!b) return;
+  window.open(svUrl(turns[+b.dataset.i]), '_blank', 'noopener');
+});
+// 地図の印を押したとき: 説明とストリートビューへのリンク（押し間違いで別のタブが開かないように、ひと手間おく）
+function showTurnPopup(i) {
+  const t = turns[i];
+  if (!t) return;
+  turnPopup?.remove();
+  turnPopup = new maplibregl.Popup({ className: 'turn-pop', offset: 14, maxWidth: '260px' }).setLngLat([t.lon, t.lat])
+    .setHTML(`<b>${i}. ${fmtDist(t.along)} 先で${turnText(t)}</b><br>${t.name ? escapeHtml(t.name) + ' ・ ' : ''}${compass(t.heading)}向き<br><a href="${svUrl(t)}" target="_blank" rel="noopener">ストリートビューで見る ↗</a>`)
+    .addTo(map);
 }
 
 // ---------- まわりの道の色分け ----------
@@ -498,7 +558,7 @@ $('btnFold').onclick = () => { $('panel').classList.toggle('folded'); syncFold()
 // ---------- 上津台の道の網を読む（前もって作ったもの。ほかの場所はスタートを置いて道順を作るときに読み込む） ----------
 (async () => {
   try {
-    const r = await fetch('./data/graph.json?v=deeb75b-10152212');
+    const r = await fetch('./data/graph.json?v=25f4730-10152218');
     const g = new Graph(await r.json());
     graphs.unshift(g);
     useGraph(g);

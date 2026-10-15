@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="ja">
 <head>
-<meta charset="utf-8"><meta name="build" content="deeb75b-10152212">
+<meta charset="utf-8"><meta name="build" content="25f4730-10152218">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>あんしん散歩道</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22%3E%3Crect width=%2232%22 height=%2232%22 rx=%227%22 fill=%22%23166534%22/%3E%3Cpath d=%22M16 6c-5 0-9 3.6-9 8.5S11 26 16 26s9-6.6 9-11.5S21 6 16 6z%22 fill=%22none%22 stroke=%22%23bbf7d0%22 stroke-width=%223%22/%3E%3Ccircle cx=%2216%22 cy=%2226%22 r=%223.2%22 fill=%22%23fde047%22/%3E%3C/svg%3E">
@@ -9,7 +9,7 @@
 <link rel="preconnect" href="https://basemaps.cartocdn.com" crossorigin>
 <link rel="preconnect" href="https://tiles.basemaps.cartocdn.com" crossorigin>
 <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
-<link rel="stylesheet" href="./style.css?v=deeb75b-10152212">
+<link rel="stylesheet" href="./style.css?v=25f4730-10152218">
 <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
 </head>
 <body>
@@ -65,6 +65,10 @@
         <button type="button" id="btnNext">別の道順 <span id="rIdx"></span></button>
         <button type="button" id="btnWalk" class="go">歩きはじめる</button>
       </div>
+      <details id="turnsBox">
+        <summary>曲がり角 <span id="turnCount"></span><small>押すとストリートビュー</small></summary>
+        <ol id="turnList"></ol>
+      </details>
       <div id="walkInfo" hidden></div>
     </div>
 
@@ -82,7 +86,8 @@
     <li>上津台のまわりの外では、「道順を作る」を押したときに、まわりの道をその場で読み込みます（数秒〜数十秒）。</li>
     <li><b>歩く時間</b>と<b>歩く速さ</b>を選び、「道順を作る」を押します。</li>
     <li>スタートに戻ってくる輪の道順が、道の安全さの色で出ます。矢印が進む向きです。気に入らなければ「別の道順」。</li>
-    <li>「歩きはじめる」を押すと現在地を追いかけ、あとどのくらいかを出します。</li>
+    <li>「曲がり角」の一覧か、地図の番号の印を押すと、その角を曲がった先の向きで Google ストリートビューが開きます（別のタブ。スマホでは Google マップのアプリ）。撮影されていない道では、近くの道の景色になることがあります。</li>
+    <li>「歩きはじめる」を押すと現在地を追いかけ、あとどのくらいか・次の曲がり角を出します。</li>
   </ol>
   <h3>道の色（安全さの見当）</h3>
   <ul class="legend big" id="helpLegend"></ul>
@@ -108,6 +113,6 @@
   <form method="dialog"><button>閉じる</button></form>
 </dialog>
 
-<script type="module" src="./app.mjs?v=deeb75b-10152212"></script>
+<script type="module" src="./app.mjs?v=25f4730-10152218"></script>
 </body>
 </html>
