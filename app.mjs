@@ -1,6 +1,7 @@
 // あんしん散歩道: スタート地点と歩く時間を決めると、なるべく安全な道を通ってスタートに戻る道順を作る
-import { Graph, makeLoops, routeGeometry, Progress } from './route.mjs?v=3b74fde-10152124';
-import { demSource, exaggerationFor } from './terrain.mjs?v=3b74fde-10152124';
+import { Graph, makeLoops, routeGeometry, Progress } from './route.mjs?v=1412f2f-10152140';
+import { demSource, exaggerationFor } from './terrain.mjs?v=1412f2f-10152140';
+import { loadArea, bboxAround } from './area-loader.mjs?v=1412f2f-10152140';
 
 const $ = (id) => document.getElementById(id);
 const COLORS = ['#16a34a', '#2563eb', '#ca8a04', '#ea580c', '#dc2626'];
@@ -11,10 +12,11 @@ const narrow = () => innerWidth <= 720;
 const load = (k, d) => { try { return localStorage.getItem(k) ?? d; } catch { return d; } };
 const save = (k, v) => { try { localStorage.setItem(k, v); } catch { /* 使えなくてもよい */ } };
 
-let G = null;
+let G = null;              // いま使っている道の網
+const graphs = [];         // 読み込んだ道の網（最初は上津台。ほかの場所はスタートのまわりをその場で読む）
 let minutes = +load('wk.min', 30);
 let speed = +load('wk.speed', 4.5);
-let start = null;          // { lon, lat, node }
+let start = null;          // { lon, lat }（道の網の中なら近くの交差点に寄せた位置）
 let routes = [], idx = 0;  // 作った道順の候補と、いま出している番号
 let geom = null;           // いまの道順の形
 let walking = false, progress = null, arrived = false;
@@ -106,7 +108,6 @@ map.on('load', () => {
     'symbol-placement': 'line', 'symbol-spacing': ['interpolate', ['linear'], ['zoom'], 14, 70, 18, 140], 'icon-image': 'arrow',
     'icon-size': ['interpolate', ['linear'], ['zoom'], 14, 0.7, 18, 1.2], 'icon-allow-overlap': true, 'icon-ignore-placement': true, 'icon-rotation-alignment': 'map',
   } });
-  if (G) setStart(CENTER[0], CENTER[1], { quiet: true });
   updateNet();
 });
 map.on('zoom', () => { if (map.getTerrain()) map.terrain.exaggeration = exaggerationFor(map.getZoom()); });
@@ -167,9 +168,9 @@ function getPosition(timeout = 8000) {
 // 現在地を画面の中ほどに。取れないとき（屋内・許可なし）は、歩いている道順の位置かスタート地点
 async function locateMe() {
   const p = await getPosition();
-  if (p) { map.easeTo({ center: [p.lon, p.lat], zoom: Math.max(map.getZoom(), 16), duration: 700, padding: mapPadding(true) }); return; }
+  if (p) { map.easeTo({ center: [p.lon, p.lat], zoom: Math.max(map.getZoom(), 16), duration: 700, offset: centerOffset() }); return; }
   if (start) {
-    map.easeTo({ center: [start.lon, start.lat], duration: 700, padding: mapPadding(true) });
+    map.easeTo({ center: [start.lon, start.lat], duration: 700, offset: centerOffset() });
     toast('現在地が分からないので、スタート地点を出しました');
   }
 }
@@ -182,29 +183,48 @@ pinEl.innerHTML = '<svg viewBox="0 0 34 44"><path d="M17 1C8.2 1 1 8 1 16.6 1 28
 const pin = new maplibregl.Marker({ element: pinEl, anchor: 'bottom', draggable: true });
 pin.on('dragend', () => { const p = pin.getLngLat(); setStart(p.lng, p.lat); });
 
+// スタートはどこにでも置ける（利用者の指定。2026-10-15）。読み込んだ道の網の中なら近くの交差点に寄せ、
+// 外なら置いた所のまま。道順を作るときに、まわりの道を読み込む（ensureGraph）
 let labelSeq = 0;
 async function setStart(lon, lat, { quiet = false } = {}) {
-  if (!G) return;
-  if (!G.inside(lon, lat)) {
-    toast('道のデータは上津台のまわり約 3 km までです。その中を選んでください');
-    if (start) pin.setLngLat([start.lon, start.lat]);
-    return;
-  }
-  const { node, dist } = G.nearestNode(lon, lat, 3);
-  if (dist > 300) {
-    toast('近くに歩ける道がありません');
-    if (start) pin.setLngLat([start.lon, start.lat]);
-    return;
-  }
   if (walking) stopWalking();
-  start = { lon: G.lon[node], lat: G.lat[node], node };
-  pin.setLngLat([start.lon, start.lat]).addTo(map);
+  const g = graphs.find((x) => x.inside(lon, lat));
+  if (g) {
+    const { node, dist } = g.nearestNode(lon, lat, 3);
+    if (dist <= 150) { lon = g.lon[node]; lat = g.lat[node]; }
+  }
+  start = { lon, lat };
+  pin.setLngLat([lon, lat]).addTo(map);
   clearRoute();
   $('startLabel').textContent = '選んだ地点';
   const seq = ++labelSeq;
-  const name = await placeName(start.lon, start.lat);
+  const name = await placeName(lon, lat);
   if (seq === labelSeq) $('startLabel').textContent = name ? `${name} 付近` : '選んだ地点';
-  if (!quiet && !narrow()) map.easeTo({ center: [start.lon, start.lat], duration: 500, padding: mapPadding(true) });
+  if (!quiet && !narrow()) map.easeTo({ center: [lon, lat], duration: 500, offset: centerOffset() });
+}
+// 道順に要る広さ（m）: 輪の円は半径 D ÷ 2π ÷ 1.25 ほど。中継点は出発地から円の直径まで離れ、長さの調整で円が大きくなることもある
+const needRadius = (D) => 2.3 * D / (2 * Math.PI * 1.25) + 350;
+let loading = null;
+// スタートのまわり radius m を覆う道の網を使う。無ければ読み込む
+async function ensureGraph(radius, onProgress) {
+  const box = bboxAround([start.lon, start.lat], radius);
+  const g = graphs.find((x) => x.covers(box));
+  if (g) { useGraph(g); return g; }
+  loading?.abort();
+  loading = new AbortController();
+  const j = await loadArea([start.lon, start.lat], radius * 1.15, { onProgress, signal: loading.signal });
+  const ng = new Graph(j);
+  if (j.source === 'gsi') toast('OpenStreetMap が混んでいて読めなかったので、国土地理院の道だけで作りました（歩道や小道は少なめです）');
+  graphs.push(ng);
+  if (graphs.length > 4) graphs.splice(1, 1); // 上津台（最初の 1 つ）は残し、古いものから捨てる
+  useGraph(ng);
+  return ng;
+}
+function useGraph(g) {
+  if (G === g) return;
+  G = g;
+  netData = null;
+  updateNet();
 }
 // 町名（国土地理院の逆ジオコーダ）
 async function placeName(lon, lat) {
@@ -214,9 +234,9 @@ async function placeName(lon, lat) {
     return j?.results?.lv01Nm?.trim() || '';
   } catch { return ''; }
 }
+// 地図をタップするとスタートをそこへ（道順を出していても。案内の途中だけは動かさない）
 map.on('click', (e) => {
-  if (!G) return;
-  if (routes.length || walking) { toast('スタートを変えるときは、緑のピンを動かしてください'); return; }
+  if (walking) { toast('案内の途中です。スタートを変えるときは「案内をやめる」を押してください'); return; }
   setStart(e.lngLat.lng, e.lngLat.lat);
 });
 $('btnHere').onclick = async () => {
@@ -225,7 +245,7 @@ $('btnHere').onclick = async () => {
   $('btnHere').disabled = false;
   if (!p) { toast('現在地が分かりませんでした（位置情報の許可を確かめてください）'); return; }
   setStart(p.lon, p.lat);
-  map.easeTo({ center: [p.lon, p.lat], duration: 600, padding: mapPadding(true) });
+  map.easeTo({ center: [p.lon, p.lat], duration: 600, offset: centerOffset() });
 };
 
 // ---------- 時間・速さ ----------
@@ -245,21 +265,43 @@ const metersPerMin = () => speed * 1000 / 60;
 
 // ---------- 道順を作る ----------
 $('btnMake').onclick = async () => {
-  if (!G || !start) return;
+  if (!start) return;
   const btn = $('btnMake');
+  const D = minutes * metersPerMin();
   btn.disabled = true;
   btn.textContent = '道順を作っています…';
+  let found = [];
   try {
-    routes = await makeLoops(G, start.node, minutes * metersPerMin(), { onProgress: (f) => { btn.textContent = `道順を作っています… ${Math.round(f * 100)}%`; } });
+    const g = await ensureGraph(needRadius(D), (f) => { btn.textContent = `まわりの道を読み込んでいます… ${Math.round(f * 100)}%`; });
+    const { node, dist } = g.nearestNode(start.lon, start.lat, 3);
+    if (node < 0 || dist > 300) { toast('スタートの近くに歩ける道がありません。道の上に置いてください'); return; }
+    // 道の上に寄せる（ピンも動かす）
+    start = { lon: g.lon[node], lat: g.lat[node], node };
+    pin.setLngLat([start.lon, start.lat]);
+    btn.textContent = '道順を作っています…';
+    found = await makeLoops(g, node, D, { onProgress: (f) => { btn.textContent = `道順を作っています… ${Math.round(f * 100)}%`; } });
+  } catch (e) {
+    if (e?.name !== 'AbortError') { console.error(e); toast('まわりの道を読み込めませんでした。少し待ってからもう一度押してください'); }
+    return;
   } finally {
     btn.disabled = false;
-    btn.textContent = '道順を作り直す';
+    btn.textContent = found.length ? '道順を作り直す' : '道順を作る';
   }
-  if (!routes.length) { toast('道順を作れませんでした。スタート地点を変えてみてください'); return; }
+  if (!found.length) { toast('道順を作れませんでした。スタート地点を変えてみてください'); return; }
+  routes = found;
+  fixedZoom = null;
   idx = 0;
   showRoute(true);
 };
-$('btnNext').onclick = () => { if (!routes.length) return; idx = (idx + 1) % routes.length; if (walking) stopWalking(); showRoute(true); };
+// 別の道順: 縮尺は変えず、道順の真ん中へ動かすだけ
+// （前は押すたびにその道順の広さに合わせ直していて、押すたびに引いていくように見えた。2026-10-15 利用者の指摘）
+$('btnNext').onclick = () => {
+  if (!routes.length) return;
+  idx = (idx + 1) % routes.length;
+  if (walking) stopWalking();
+  showRoute(false);
+  fitRoute();
+};
 
 function showRoute(fit = false) {
   const r = routes[idx];
@@ -277,7 +319,7 @@ function showRoute(fit = false) {
   $('rLegend').innerHTML = pct.map((p, i) => (p >= 0.5 ? `<li style="--c:${COLORS[i]}">${G.classes[i]} <span>${Math.round(p)}%</span></li>` : '')).join('');
   progress = new Progress(G, geom.coords);
   arrived = false;
-  $('startHint').textContent = 'スタートを変えるときは、緑のピンを動かします';
+  $('startHint').textContent = '地図をタップするか、ピンを動かすとスタートが変わります';
   // 狭い画面: 欄をたたんで結果だけにし、高さが決まってから道順に合わせる
   if (fit && narrow()) { $('panel').classList.add('folded'); syncFold(); measureSheet(); }
   if (fit) requestAnimationFrame(fitRoute);
@@ -289,21 +331,38 @@ function clearRoute() {
   map.getSource('route-all')?.setData(EMPTY);
   $('result').hidden = true;
   $('btnMake').textContent = '道順を作る';
-  $('startHint').textContent = '地図をタップするか、ピンを動かして決めます';
+  $('startHint').textContent = '地図のどこでもタップするか、ピンを動かして決めます';
   updateNet();
   measureSheet();
 }
-function fitRoute() {
-  if (!geom) return;
+// 道順に合わせる。縮尺は「候補のうちいちばん広いものが収まる大きさ」にそろえ、位置だけをいまの道順の真ん中にする
+// （候補をまとめた範囲に合わせると、四方に広がるので引きすぎた）
+let fixedZoom = null;
+function routeBounds(r) {
   const b = new maplibregl.LngLatBounds();
-  for (const c of geom.coords) b.extend(c);
-  map.fitBounds(b, { padding: mapPadding(), pitch: map.getPitch(), bearing: map.getBearing(), duration: 900, maxZoom: 17 });
+  for (const { e } of r.path) for (const c of G.coordsOf(e)) b.extend(c);
+  return b;
 }
-// 操作の欄に隠れない範囲
-function mapPadding(center = false) {
+function fitRoute() {
+  if (!routes.length) return;
+  map.setPadding({ top: 0, bottom: 0, left: 0, right: 0 });
+  const opt = { padding: mapPadding(), bearing: map.getBearing() };
+  if (fixedZoom === null) fixedZoom = Math.min(17, ...routes.map((r) => map.cameraForBounds(routeBounds(r), opt)?.zoom ?? 17));
+  const cam = map.cameraForBounds(routeBounds(routes[idx]), opt);
+  if (!cam) return;
+  map.easeTo({ center: cam.center, zoom: fixedZoom, bearing: map.getBearing(), pitch: map.getPitch(), duration: 800 });
+}
+// 操作の欄に隠れない範囲（fitBounds の余白）
+function mapPadding() {
   const sheet = $('panel').getBoundingClientRect();
-  if (narrow()) return center ? { top: 0, bottom: sheet.height, left: 0, right: 0 } : { top: 50, bottom: sheet.height + 30, left: 30, right: 70 };
-  return center ? { top: 0, bottom: 0, left: sheet.right, right: 0 } : { top: 50, bottom: 50, left: sheet.right + 40, right: 80 };
+  if (narrow()) return { top: 50, bottom: sheet.height + 30, left: 30, right: 70 };
+  return { top: 50, bottom: 50, left: sheet.right + 40, right: 80 };
+}
+// 地点を「操作の欄に隠れない部分の真ん中」に出すための、中心からのずれ（easeTo の offset）。
+// padding を使うと地図に余白が残り、あとの fitBounds の余白に足されるので使わない
+function centerOffset() {
+  const sheet = $('panel').getBoundingClientRect();
+  return narrow() ? [0, -sheet.height / 2] : [sheet.right / 2, 0];
 }
 
 // ---------- 歩く ----------
@@ -319,7 +378,7 @@ async function startWalking() {
   const p = await getPosition(15000);
   if (!walking) return;
   if (!p) { $('walkInfo').textContent = '現在地が分かりません。位置情報の許可を確かめてください'; return; }
-  map.easeTo({ center: [p.lon, p.lat], zoom: 17, pitch: 55, duration: 900, padding: mapPadding(true) });
+  map.easeTo({ center: [p.lon, p.lat], zoom: 17, pitch: 55, duration: 900, offset: centerOffset() });
   onPosition();
 }
 function stopWalking() {
@@ -343,7 +402,7 @@ function onPosition() {
   // 地図を動かした直後（20 秒）は追いかけない
   if (Date.now() - userMovedAt > 20000 && Date.now() - lastFollow > 3000 && !map.isMoving()) {
     lastFollow = Date.now();
-    map.easeTo({ center: [me.lon, me.lat], duration: 800, padding: mapPadding(true) });
+    map.easeTo({ center: [me.lon, me.lat], duration: 800, offset: centerOffset() });
   }
 }
 
@@ -370,7 +429,7 @@ function toast(msg) {
   const el = $('toast');
   el.textContent = msg; el.hidden = false;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { el.hidden = true; }, 3500);
+  toastTimer = setTimeout(() => { el.hidden = true; }, Math.max(3500, msg.length * 120));
 }
 function legendHtml(big) {
   return COLORS.map((c, i) => `<li style="--c:${c}"><b>${G ? G.classes[i] : ''}</b>${big ? `：${CLASS_NOTE[i]}` : ''}</li>`).join('');
@@ -391,17 +450,16 @@ function syncFold() {
 }
 $('btnFold').onclick = () => { $('panel').classList.toggle('folded'); syncFold(); };
 
-// ---------- 道の網を読む ----------
+// ---------- 上津台の道の網を読む（前もって作ったもの。ほかの場所はスタートを置いて道順を作るときに読み込む） ----------
 (async () => {
   try {
-    const r = await fetch('./data/graph.json?v=3b74fde-10152124');
-    G = new Graph(await r.json());
+    const r = await fetch('./data/graph.json?v=1412f2f-10152140');
+    const g = new Graph(await r.json());
+    graphs.unshift(g);
+    useGraph(g);
+    if (g.j.osmBase) $('osmDate').textContent = `（上津台は ${g.j.osmBase.slice(0, 10)} 時点、ほかの場所は開いた時点）`;
   } catch (e) {
-    toast('道のデータを読み込めませんでした');
-    console.error(e);
-    return;
+    console.error(e); // 無くても、まわりの道をその場で読み込めば使える
   }
-  if (G.j.osmBase) $('osmDate').textContent = `（${G.j.osmBase.slice(0, 10)} 時点）`;
-  if (map.loaded() || map.isStyleLoaded()) setStart(CENTER[0], CENTER[1], { quiet: true });
-  updateNet();
+  if (!start) setStart(CENTER[0], CENTER[1], { quiet: true });
 })();

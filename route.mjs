@@ -41,6 +41,8 @@ export class Graph {
   }
 
   inside(lon, lat) { const b = this.bbox; return lon > b.w && lon < b.e && lat > b.s && lat < b.n; }
+  /** 範囲 box がこの道の網の範囲に収まるか */
+  covers(box) { const b = this.bbox; return box.w >= b.w && box.e <= b.e && box.s >= b.s && box.n <= b.n; }
   toXY(lon, lat) { return [(lon - this.center[0]) * this.kx, (lat - this.center[1]) * this.ky]; }
   toLonLat(x, y) { return [x / this.kx + this.center[0], y / this.ky + this.center[1]]; }
 

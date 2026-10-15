@@ -1,15 +1,15 @@
 <!doctype html>
 <html lang="ja">
 <head>
-<meta charset="utf-8"><meta name="build" content="3b74fde-10152124">
+<meta charset="utf-8"><meta name="build" content="1412f2f-10152140">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>あんしん散歩道（上津台）</title>
+<title>あんしん散歩道</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22%3E%3Crect width=%2232%22 height=%2232%22 rx=%227%22 fill=%22%23166534%22/%3E%3Cpath d=%22M16 6c-5 0-9 3.6-9 8.5S11 26 16 26s9-6.6 9-11.5S21 6 16 6z%22 fill=%22none%22 stroke=%22%23bbf7d0%22 stroke-width=%223%22/%3E%3Ccircle cx=%2216%22 cy=%2226%22 r=%223.2%22 fill=%22%23fde047%22/%3E%3C/svg%3E">
-<meta name="description" content="スタート地点と歩く時間を決めると、なるべく安全な道（歩行者の道・広い道）を通って、スタートに戻ってくる散歩の道順を作ります。神戸市北区上津台。">
+<meta name="description" content="スタート地点と歩く時間を決めると、なるべく安全な道（歩行者の道・広い道）を通って、スタートに戻ってくる散歩の道順を作ります。スタートはどこでも置けます。">
 <link rel="preconnect" href="https://basemaps.cartocdn.com" crossorigin>
 <link rel="preconnect" href="https://tiles.basemaps.cartocdn.com" crossorigin>
 <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
-<link rel="stylesheet" href="./style.css?v=3b74fde-10152124">
+<link rel="stylesheet" href="./style.css?v=1412f2f-10152140">
 <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
 </head>
 <body>
@@ -19,7 +19,7 @@
   <header class="head">
     <div>
       <h1>あんしん散歩道</h1>
-      <p class="sub">神戸市北区上津台</p>
+      <p class="sub">スタートはどこでも</p>
     </div>
     <div class="tools">
       <button type="button" id="btnHelp">使い方</button>
@@ -36,7 +36,7 @@
         <button type="button" id="btnHere" class="small">現在地にする</button>
       </div>
     </div>
-    <p class="hint" id="startHint">地図をタップするか、ピンを動かして決めます</p>
+    <p class="hint" id="startHint">地図のどこでもタップするか、ピンを動かして決めます</p>
 
     <div class="row">
       <div class="label">歩く時間</div>
@@ -78,7 +78,8 @@
 <dialog id="dlgHelp">
   <h2>使い方</h2>
   <ol>
-    <li>地図をタップするか、緑のピンを動かして<b>スタート地点</b>を決めます（「現在地にする」でも）。</li>
+    <li>地図のどこでもタップするか、緑のピンを動かして<b>スタート地点</b>を決めます（「現在地にする」でも）。はじめは神戸市北区上津台です。</li>
+    <li>上津台のまわりの外では、「道順を作る」を押したときに、まわりの道をその場で読み込みます（数秒〜数十秒）。</li>
     <li><b>歩く時間</b>と<b>歩く速さ</b>を選び、「道順を作る」を押します。</li>
     <li>スタートに戻ってくる輪の道順が、道の安全さの色で出ます。矢印が進む向きです。気に入らなければ「別の道順」。</li>
     <li>「歩きはじめる」を押すと現在地を追いかけ、あとどのくらいかを出します。</li>
@@ -107,6 +108,6 @@
   <form method="dialog"><button>閉じる</button></form>
 </dialog>
 
-<script type="module" src="./app.mjs?v=3b74fde-10152124"></script>
+<script type="module" src="./app.mjs?v=1412f2f-10152140"></script>
 </body>
 </html>

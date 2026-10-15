@@ -100,9 +100,11 @@ dialog form button { padding: 6px 16px; border-radius: 8px; border: 1px solid va
   #panel .head { padding: 10px 14px 6px; }
   #panel h1 { font-size: 16px; }
   #panel .tools .fold { display: block; }
-  #panel.folded .body > :not(#result) { display: none; }
+  /* たたむと結果だけ。道順が無いとき（たたんだままスタートを動かしたとき）は「道順を作る」を出す */
+  #panel.folded .body > :not(#result):not(#btnMake) { display: none; }
+  #panel.folded .body:has(#result:not([hidden])) #btnMake { display: none; }
+  #panel.folded #btnMake { margin-top: 0; }
   #panel.folded #result { margin-top: 0; border-top: 0; padding-top: 0; }
   #panel.folded #result .legend, #panel.folded #result .bar { display: none; }
-  #panel.folded .body:has(#result[hidden]) { display: none; }
   .maplibregl-ctrl-bottom-left { bottom: var(--sheet-h); }
 }
